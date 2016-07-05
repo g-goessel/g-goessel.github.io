@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<script src="https://code.jquery.com/jquery-1.12.0.min.js"></script>
+	<script src="https://code.highcharts.com/stock/highstock.js"></script>
+	<!-- <script src="https://code.highcharts.com/stock/modules/exporting.js"></script> -->
+</head>
+<body>
+	<div id="container1" style="width:100%; height:100%;">Downloading data</div>
+	<div id="container2" style="width:100%; height:100%;">Downloading data</div>
+	<script>
+		function sorter(a, b) {
+				var sortStatus = 0;
+				if (a[0] < b[0]) {
+						sortStatus = -1;
+				} else if (a[0] > b[0]) {
+								sortStatus = 1;
+				}
+
+				return sortStatus;
+		};
+		$(function () {
+				Highcharts.setOptions({
+					lang: {
+						months: ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin',  'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'],
+						weekdays: ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi']
+					},
+					global: {
+                useUTC: false
+          }
+				});
+
+				/**
+		    * In order to synchronize tooltips and crosshairs, override the
+		    * built-in events with handlers defined on the parent element.
+		    */
+		    $('#container').bind('mousemove touchmove touchstart', function (e) {
+		        var chart,
+		            point,
+		            i,
+		            event;
+
+		        for (i = 0; i < Highcharts.charts.length; i = i + 1) {
+		            chart = Highcharts.charts[i];
+		            event = chart.pointer.normalize(e.originalEvent); // Find coordinates within the chart
+		            point = chart.series[0].searchPoint(event, true); // Get the hovered point
+								console.log(point);
+
+		            if (point) {
+		                point.onMouseOver(); // Show the hover marker
+		                chart.tooltip.refresh(point); // Show the tooltip
+		                chart.xAxis[0].drawCrosshair(event, point); // Show the crosshair
+		            }
+		        }
+		    });
+
+		    /**
+		     * Synchronize zooming through the setExtremes event handler.
+		     */
+		    function syncExtremes(e) {
+		        var thisChart = this.chart;
+
+		        if (e.trigger !== 'syncExtremes') { // Prevent feedback loop
+		            Highcharts.each(Highcharts.charts, function (chart) {
+		                if (chart !== thisChart) {
+		                    if (chart.xAxis[0].setExtremes) { // It is null while updating
+		                        chart.xAxis[0].setExtremes(e.min, e.max, undefined, false, { trigger: 'syncExtremes' });
+		                    }
+		                }
+		            });
+		        }
+		    }
+
+				var outside_temp_data = [];
+				var outside_batt_data = [];
+				var outside_press_data = [];
+				var nights = [];
+				var night_state = 0;
+				var night_end;
+				var inside_temp_data_bmp = [];
+				var inside_temp_data_dht = [];
+				var inside_rh_data_dht = [];
+				var inside_press_data_bmp = [];
+				var jsonData1 = $.getJSON( 'https://data.sparkfun.com/output/VGAyQqjnR1f6KgAGNd40.json',function(data){
+		      $.each( data, function( key, val ) {
+			    	if(val.coherent == 1){
+			      	//console.log(val);
+			      	//console.log([Date.parse(val.timestamp),parseFloat(val.tempc)]);
+			    		outside_temp_data.push([Date.parse(val.timestamp),parseFloat(val.tempc)]);
+			    		outside_batt_data.push([Date.parse(val.timestamp),parseFloat(val.batt)]);
+			    		outside_press_data.push([Date.parse(val.timestamp),parseFloat(val.press) * Math.exp((9.81 * 75 * 0.02896) / (8.31447 * 288.15))]);
+							if(val.night != night_state){
+								if(val.night == 0){
+									// Le Soleil vient de se lever
+									nights.push({ from: Date.parse(val.timestamp), to: night_end, color: 'rgba(68, 170, 213, .2)'});
+									night_state = 0;
+								}
+								else if (val.night == 1) {
+									//Sinon la nuit vient de tomber
+									night_end = Date.parse(val.timestamp);
+									night_state = 1;
+								}
+							}
+			    	};
+		 		 });
+				 //Si nécessaire on fait en sorte que les dernières mesures soient bien considérées de nuit
+				 if(night_state == 1){
+					 nights.push({ from: outside_temp_data[outside_temp_data.length -1][0], to: night_end, color: 'rgba(68, 170, 213, .2)'});
+				 }
+				 outside_temp_data.sort(sorter);
+				 outside_batt_data.sort(sorter);
+				 outside_press_data.sort(sorter);
+		     $('#container1').highcharts('StockChart', {
+					 rangeSelector: {
+				      buttons: [{
+				        type: 'day',
+				        count: 1,
+				        text: '1day'
+				      }, {
+				        type: 'month',
+				        count: 1,
+				        text: '1mo'
+				      }, {
+				        type: 'month',
+				        count: 6,
+				        text: '6mo'
+				      }, {
+				        type: 'month',
+				        count: 12,
+				        text: '12mo'
+				      }, {
+				        type: 'all',
+				        text: 'All'
+				      }],
+				      selected: 0
+				    },
+
+		        chart: {
+		            zoomType: 'x',
+		            type: 'spline'
+		        },
+		        title: {
+		            text: 'Outside temp'
+		        },
+						legend: {
+            		enabled: true,
+						},
+		        xAxis: {
+		            type: 'datetime',
+								ordinal: false,
+								plotBands : nights,
+		            title: {
+		                text: 'Date'
+		            },
+								events: {
+                            setExtremes: syncExtremes
+                        },
+		        },
+						yAxis: [{ // Primary yAxis
+		            labels: {
+		                format: '{value} C',
+		                style: {
+		                    color: Highcharts.getOptions().colors[0]
+		                }
+		            },
+		            title: {
+		                text: 'Temperature',
+		                style: {
+		                    color: Highcharts.getOptions().colors[0]
+		                }
+		            }
+							}, { // Secondary yAxis
+		            gridLineWidth: 0,
+		            title: {
+		                text: 'Voltage',
+		                style: {
+		                    color: Highcharts.getOptions().colors[1]
+		                }
+		            },
+								opposite: false,
+								marker: {
+                		enabled: false
+            		},
+								dashStyle: 'shortdot',
+		            labels: {
+		                format: '{value} V',
+		                style: {
+		                    color: Highcharts.getOptions().colors[1]
+		                },
+										align: 'left',
+			              x: 3,
+			              y: 0
+		            }
+		        }, {
+		            labels: {
+		                format: '{value} hPa',
+		                style: {
+		                    color: Highcharts.getOptions().colors[2]
+		                }
+		            },
+		            title: {
+		                text: 'Pressure',
+		                style: {
+		                    color: Highcharts.getOptions().colors[2]
+		                }
+		            }
+							},],
+		        tooltip: {
+		            xDateFormat: '%d-%m-%Y - %k:%M',
+		            shared: true
+		        },
+		        plotOptions: {
+		            spline: {
+		                marker: {
+		                    enabled: false
+		                }
+		            }
+		        },
+		        series: [{
+		            name: 'Outside Temp',
+		            data: outside_temp_data,
+            		yAxis: 0,
+								tooltip: {
+	                valueSuffix: ' °C'
+	            	}
+		        }, {
+							name: 'Battery voltage',
+							data: outside_batt_data,
+							yAxis: 1,
+            	dashStyle: 'shortdot',
+							tooltip: {
+                valueSuffix: 'V'
+            	}
+						}, {
+		            name: 'Outside Pressure',
+		            data: outside_press_data,
+            		yAxis: 2,
+								tooltip: {
+	                valueSuffix: ' hPa'
+	            	}
+		        }]
+		    });
+		    });
+
+				var jsonData2 = $.getJSON( 'https://data.sparkfun.com/output/q54wn39Zn3fmQp53R22M.json',function(data){
+					$.each( data, function( key, val ) {
+					if(parseFloat(val.temp_bmp) < 80){
+						//console.log(val);
+						//console.log([Date.parse(val.timestamp),parseFloat(val.tempc)]);
+						inside_temp_data_bmp.push([Date.parse(val.timestamp),parseFloat(val.temp_bmp)]);
+						inside_temp_data_dht.push([Date.parse(val.timestamp),parseFloat(val.temp_dht)]);
+						inside_press_data_bmp.push([Date.parse(val.timestamp),parseFloat(val.press_bmp)]);
+						inside_rh_data_dht.push([Date.parse(val.timestamp),parseFloat(val.rh_dht)]);
+					};
+				 });
+
+				 inside_temp_data_bmp.sort(sorter);
+				 inside_temp_data_dht.sort(sorter);
+				 inside_press_data_bmp.sort(sorter);
+				 inside_rh_data_dht.sort(sorter);
+				 $('#container2').highcharts('StockChart', {
+					 rangeSelector: {
+				      buttons: [{
+				        type: 'day',
+				        count: 1,
+				        text: '1day'
+				      }],
+					 			selected: 0,
+						},
+						chart: {
+								zoomType: 'x',
+								type: 'spline'
+						},
+						title: {
+								text: 'Inside temp'
+						},
+						legend: {
+            		enabled: true,
+						},
+						xAxis: {
+								type: 'datetime',
+								ordinal: false,
+								plotBands : nights,
+								title: {
+										text: 'Date'
+								},
+								events: {
+                            setExtremes: syncExtremes
+                        },
+						},
+						yAxis: [{ // Primary yAxis
+		            labels: {
+		                format: '{value} C',
+		                style: {
+		                    color: Highcharts.getOptions().colors[0]
+		                }
+		            },
+		            title: {
+		                text: 'Temperature (bmp)',
+		                style: {
+		                    color: Highcharts.getOptions().colors[0]
+		                }
+		            }
+							}, { // Secondary yAxis
+		            gridLineWidth: 0,
+		            title: {
+		                text: 'Temperature (dht)',
+		                style: {
+		                    color: Highcharts.getOptions().colors[1]
+		                }
+		            },
+								opposite: false,
+								marker: {
+                		enabled: false
+            		},
+								dashStyle: 'shortdot',
+		            labels: {
+		                format: '{value} C',
+		                style: {
+		                    color: Highcharts.getOptions().colors[1]
+		                }
+		            }
+			        }, {
+			            labels: {
+			                format: '{value} %',
+											opposite: false,
+			                style: {
+			                    color: Highcharts.getOptions().colors[2]
+			                },
+											align: 'left',
+				              x: 3,
+				              y: 0
+			            },
+			            title: {
+			                text: 'Humidity',
+			                style: {
+			                    color: Highcharts.getOptions().colors[2]
+			                }
+			            }
+							}
+						],
+						tooltip: {
+								xDateFormat: '%d-%m-%Y - %k:%M',
+								shared: true
+						},
+						plotOptions: {
+								spline: {
+										marker: {
+												enabled: false
+										}
+								}
+						},
+						series: [{
+								name: 'Inside Temp (BMP)',
+								data: inside_temp_data_bmp,
+								yAxis: 0
+						}, {
+								name: 'Inside Temp (DHT)',
+								data: inside_temp_data_dht,
+								yAxis: 1
+						}, {
+								name: 'Inside humidity',
+								data: inside_rh_data_dht,
+								yAxis: 2
+						}],
+			});
+		});
+		});
+	</script>
+</body>
+</html>
